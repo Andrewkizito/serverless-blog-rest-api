@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  backend
+
+  Sample SAM Template for backend
+
+Parameters:
+  CognitoArn:
+    Type: String
+    Description: Enter the arn of the cognito user pool being used for authentication
+  StorageBucket:
+    Type: String
+    Description: Enter the bucket name that will be used to files
+
+Globals:
+  Function:
+    Timeout: 3
+    MemorySize: 128
+    Handler: index.handler
+    Runtime: python3.9
+    Architectures:
+      - arm64
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref Database
+        BUCKET_NAME: !Ref StorageBucket
+  Api:
+    TracingEnabled: true
+
+Resources:
+  # Rest API
+  BlogRestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Name: BlogRestApi
+      Description: "A rest api for a blog application"
+
+      # Enabling cors
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS,PATCH,DELETE'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+
+      # Defining Auth
+      Auth:
+        Authorizers:
+          Cognito:
+            UserPoolArn: !Ref CognitoArn
+            Identity:
+              Header: Authorization
+
+  Database:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "Blog-Application"
+      AttributeDefinitions:
+        - AttributeName: "PK"
+          AttributeType: "S"
+        - AttributeName: "SK"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "PK"
+          KeyType: "HASH"
+        - AttributeName: "SK"
+          KeyType: "RANGE"
+      BillingMode: "PAY_PER_REQUEST"
+
+  # Get All Posts
+  getPostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/getPosts
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref Database
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogRestApi
+            Path: /blog
+            Method: GET
+
+  # Get Single Post
+  getSinglePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/getSinglePost
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref Database
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogRestApi
+            Path: /blog/{id}
+            Method: GET
+
+  # Create Blog
+  CreateBlogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/createBlog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Database
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogRestApi
+            Path: /blog
+            Method: POST
+            Auth:
+              Authorizer: Cognito
+
+  # Update Blog
+  UpdateBlogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/updateBlog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Database
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogRestApi
+            Path: /blog/{id}
+            Method: PATCH
+            Auth:
+              Authorizer: Cognito
+
+  # Delete Blog
+  DeleteBlogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/deleteBlog
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Database
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogRestApi
+            Path: /blog
+            Method: DELETE
+            Auth:
+              Authorizer: Cognito
+
+Outputs:
+  RestApiUrl:
+    Description: API Gateway endpoint URL for Prod stage
+    Value: !Sub "https://${BlogRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/"
